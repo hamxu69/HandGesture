@@ -855,17 +855,38 @@ function renderLoop(now) {
 
     if (hands.length > 0) {
       detectedCount++;
-      const lm    = hands[0];
-      const fs    = getFingerStates(lm);
-      const label = classify(fs);
-      const color = GESTURE_COLORS[label] || GESTURE_COLORS["Unknown"];
 
-      // Draw skeleton (mirror-correct: flip x)
-      const mirroredLm = lm.map(p => ({ x: 1 - p.x, y: p.y, z: p.z }));
-      drawSkeleton(mirroredLm, W, H, color);
+      // ── Loop over EVERY detected hand ──────────────────────────
+      const labels = [];
+      hands.forEach((lm, handIdx) => {
+        const fs    = getFingerStates(lm);
+        const label = classify(fs);
+        const color = GESTURE_COLORS[label] || GESTURE_COLORS["Unknown"];
 
-      setGesture(label);
-      updateFingerBars(fs);
+        // Mirror-correct: flip x so skeleton matches the mirrored video
+        const mirroredLm = lm.map(p => ({ x: 1 - p.x, y: p.y, z: p.z }));
+        drawSkeleton(mirroredLm, W, H, color);
+
+        // Label each hand individually above its wrist
+        const wrist = mirroredLm[0];
+        ctx.font      = "bold 15px 'Syne', sans-serif";
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.fillText(label, wrist.x * W, wrist.y * H - 16);
+
+        labels.push({ label, fs, handIdx });
+      });
+
+      // Sidebar shows dominant hand (first detected)
+      const dominant = labels[0];
+      setGesture(dominant.label);
+      updateFingerBars(dominant.fs);
+
+      // Badge shows both labels if 2 hands visible
+      if (labels.length === 2) {
+        badgeLabel.textContent = `${labels[0].label}  ·  ${labels[1].label}`;
+      }
+
     } else {
       setGesture("");
       clearFingerBars();
