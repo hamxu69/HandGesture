@@ -1,383 +1,894 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>LUMIÈRE — Fine Jewellery</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HandSense — Real-Time Gesture Recognition</title>
+
+  <!-- MediaPipe Tasks Vision via CDN -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm/index.js"
+    }
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Tokens ─────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0a0f;
+      --surface:   #12121a;
+      --border:    rgba(255,255,255,0.07);
+      --text:      #e8e8f0;
+      --muted:     #555570;
+      --accent:    #00ffcc;
+
+      /* Per-gesture accent colours */
+      --c-palm:    #00ffcc;
+      --c-fist:    #ff4d6d;
+      --c-peace:   #ffd166;
+      --c-thumb:   #4cc9f0;
+      --c-point:   #f77f00;
+      --c-unknown: #666688;
+
+      --font-display: 'Syne', sans-serif;
+      --font-mono:    'DM Mono', monospace;
+      --radius:       14px;
+      --transition:   0.25s ease;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-display);
+      overflow: hidden;
+    }
+
+    /* ── Layout ──────────────────────────────────── */
+    .shell {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100vh;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 20px;
+      gap: 0;
+    }
+
+    /* ── Header ──────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 0 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: var(--accent);
+      border-radius: 10px;
+      display: grid; place-items: center;
+      font-size: 18px;
+    }
+
+    .logo-text {
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-text span { color: var(--accent); }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 5px 14px;
+      transition: color var(--transition), border-color var(--transition);
+    }
+
+    .status-pill.ready { color: var(--accent); border-color: rgba(0,255,204,0.25); }
+    .status-pill.error { color: #ff4d6d;       border-color: rgba(255,77,109,0.25); }
+
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background var(--transition);
+    }
+
+    .status-pill.ready .status-dot { background: var(--accent); animation: pulse 1.5s infinite; }
+    .status-pill.error .status-dot { background: #ff4d6d; }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    /* ── Main content ────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 16px;
+      padding: 16px 0;
+      overflow: hidden;
+    }
+
+    /* ── Camera area ─────────────────────────────── */
+    .camera-wrap {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #video {
+      display: none; /* hidden — canvas is the display */
+    }
+
+    #canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: var(--radius);
+      display: block;
+    }
+
+    /* Overlay: gesture badge */
+    .gesture-badge {
+      position: absolute;
+      top: 16px; left: 16px;
+      background: rgba(10,10,15,0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: border-color var(--transition);
+    }
+
+    .gesture-badge .badge-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      transition: background var(--transition);
+      flex-shrink: 0;
+    }
+
+    .gesture-badge .badge-label {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      transition: color var(--transition);
+    }
+
+    /* Overlay: hand count */
+    .hand-count {
+      position: absolute;
+      top: 16px; right: 16px;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      background: rgba(10,10,15,0.6);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 5px 12px;
+    }
+
+    /* Start screen overlay */
+    .start-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      transition: opacity 0.4s ease;
+    }
+
+    .start-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    .start-icon {
+      font-size: 4rem;
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%,100% { transform: translateY(0); }
+      50%      { transform: translateY(-10px); }
+    }
+
+    .start-overlay h2 {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      text-align: center;
+    }
+
+    .start-overlay p {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+      max-width: 280px;
+      line-height: 1.6;
+    }
+
+    .btn-start {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      padding: 13px 32px;
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      box-shadow: 0 0 0 0 rgba(0,255,204,0.4);
+    }
+
+    .btn-start:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 24px rgba(0,255,204,0.35);
+    }
+
+    .btn-start:active { transform: translateY(0); }
+    .btn-start:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Loading spinner */
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    /* ── Sidebar ─────────────────────────────────── */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+
+    .sidebar::-webkit-scrollbar { display: none; }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .panel-title {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    /* Gesture list */
+    .gesture-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .gesture-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: background var(--transition), border-color var(--transition);
+    }
+
+    .gesture-item.active {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .gesture-item .g-emoji { font-size: 1.25rem; line-height: 1; }
+
+    .gesture-item .g-info { flex: 1; }
+    .gesture-item .g-name {
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .gesture-item .g-desc {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .gesture-item .g-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      opacity: 0.2;
+      transition: opacity var(--transition), background var(--transition);
+    }
+
+    .gesture-item.active .g-dot { opacity: 1; }
+
+    /* Finger state grid */
+    .finger-grid {
+      display: flex;
+      gap: 6px;
+      justify-content: space-between;
+    }
+
+    .finger-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .finger-label {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .finger-bar {
+      width: 100%;
+      height: 48px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .finger-bar-fill {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 0%;
+      background: var(--accent);
+      border-radius: 6px;
+      transition: height 0.15s ease, background 0.15s ease;
+    }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .stat-cell {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .stat-val {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1;
+    }
+
+    .stat-key {
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    /* ── Footer ──────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 10px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    footer p {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--accent); text-decoration: none; }
+
+    /* ── Responsive ──────────────────────────────── */
+    @media (max-width: 700px) {
+      main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+      .sidebar { flex-direction: row; flex-wrap: wrap; overflow-y: visible; }
+      .panel { flex: 1; min-width: 140px; }
+      html, body { overflow: auto; }
+      .shell { height: auto; }
+    }
+  </style>
 </head>
 <body>
 
-  <!-- ══════════════════════════════════════════════
-       NAV
-  ══════════════════════════════════════════════ -->
-  <nav id="mainNav">
-    <div class="nav-logo" onclick="showView('home')">LUMI<span>È</span>RE</div>
-    <div class="nav-actions">
-      <button class="nav-btn" onclick="showView('shop')">Shop</button>
-      <button class="nav-btn cart-btn" onclick="showView('cart')">
-        Bag <span class="cart-badge" id="cartBadge">0</span>
-      </button>
-      <button class="nav-btn" onclick="showAdminLogin()">Admin</button>
+<div class="shell">
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">✋</div>
+      <div class="logo-text">Hand<span>Sense</span></div>
     </div>
-  </nav>
+    <div class="status-pill" id="statusPill">
+      <div class="status-dot"></div>
+      <span id="statusText">Initialising…</span>
+    </div>
+  </header>
 
-  <!-- ══════════════════════════════════════════════
-       HOME VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view active" id="view-home">
-    <section class="hero">
-      <p class="hero-eyebrow">Handcrafted Fine Jewellery</p>
-      <h1 class="hero-title">Wear What<br><em>Moves You</em></h1>
-      <p class="hero-sub">Timeless pieces crafted for modern souls. Each piece tells a story.</p>
-      <button class="hero-cta" onclick="showView('shop')">Explore Collection</button>
-      <div class="hero-scroll">
-        <div class="scroll-line"></div>
-        <span>Scroll</span>
-      </div>
-    </section>
+  <!-- ── Main ── -->
+  <main>
 
-    <section class="section">
-      <div class="section-header">
-        <p class="section-eyebrow">Browse by</p>
-        <h2 class="section-title">Categories</h2>
-      </div>
-      <div class="categories-grid" id="categoriesGrid"></div>
-    </section>
+    <!-- Camera -->
+    <div class="camera-wrap">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
 
-    <section class="section" style="background:var(--gray-pale)">
-      <div class="section-header">
-        <p class="section-eyebrow">New in</p>
-        <h2 class="section-title">Featured Pieces</h2>
+      <!-- Gesture badge overlay -->
+      <div class="gesture-badge" id="gestureBadge">
+        <div class="badge-dot" id="badgeDot"></div>
+        <div class="badge-label" id="badgeLabel">—</div>
       </div>
-      <div class="products-grid" id="featuredGrid"></div>
-      <div style="text-align:center;margin-top:28px">
-        <button class="btn-primary" style="max-width:220px;margin:0 auto" onclick="showView('shop')">View All</button>
-      </div>
-    </section>
 
-    <div class="trust-strip">
-      <div class="trust-grid">
-        <div class="trust-item">
-          <span class="trust-icon">✦</span>
-          <div class="trust-label">Free Shipping</div>
-          <div class="trust-desc">On orders over PKR 5,000</div>
-        </div>
-        <div class="trust-item">
-          <span class="trust-icon">◈</span>
-          <div class="trust-label">Certified Gold</div>
-          <div class="trust-desc">100% authentic materials</div>
-        </div>
-        <div class="trust-item">
-          <span class="trust-icon">↺</span>
-          <div class="trust-label">Easy Returns</div>
-          <div class="trust-desc">7-day return policy</div>
-        </div>
-        <div class="trust-item">
-          <span class="trust-icon">✉</span>
-          <div class="trust-label">Gift Wrapping</div>
-          <div class="trust-desc">Complimentary on request</div>
-        </div>
+      <!-- Hand count -->
+      <div class="hand-count" id="handCount">0 hands</div>
+
+      <!-- Start overlay -->
+      <div class="start-overlay" id="startOverlay">
+        <div class="start-icon">✋</div>
+        <h2>Real-Time Gesture Recognition</h2>
+        <p>Powered by MediaPipe Tasks Vision · Runs entirely in your browser</p>
+        <button class="btn-start" id="btnStart" disabled>Loading model…</button>
+      </div>
+
+      <!-- Loading overlay (shown while model loads) -->
+      <div class="start-overlay" id="loadOverlay" style="background:var(--bg)">
+        <div class="spinner"></div>
+        <p class="loading-text" id="loadText">Loading MediaPipe model…</p>
       </div>
     </div>
 
-    <footer>
-      <div class="footer-logo">LUMI<span>È</span>RE</div>
-      <div class="footer-tagline">Fine Jewellery</div>
-      <div class="footer-links">
-        <span class="footer-link" onclick="showView('shop')">Shop</span>
-        <span class="footer-link" onclick="showView('cart')">Bag</span>
-        <span class="footer-link" onclick="showToast('Contact: info@lumiere.com')">Contact</span>
-      </div>
-      <div class="footer-copy">© 2025 Lumière. All rights reserved.</div>
-    </footer>
-  </div>
+    <!-- Sidebar -->
+    <div class="sidebar">
 
-  <!-- ══════════════════════════════════════════════
-       SHOP VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view" id="view-shop">
-    <section class="section" style="padding-top:80px">
-      <div class="section-header">
-        <p class="section-eyebrow">Our</p>
-        <h2 class="section-title">Collection</h2>
-      </div>
-      <div class="search-bar">
-        <span class="search-icon">🔍</span>
-        <input class="search-input" id="searchInput" placeholder="Search pieces…" oninput="renderShopProducts()">
-      </div>
-      <div class="products-filter" id="shopFilters"></div>
-      <div class="products-grid" id="shopGrid"></div>
-      <p id="noResults" style="text-align:center;color:var(--gray);display:none;padding:40px 0;font-size:14px">No pieces found for this search.</p>
-    </section>
-  </div>
-
-  <!-- ══════════════════════════════════════════════
-       PRODUCT DETAIL VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view" id="view-product">
-    <div class="product-detail-view">
-      <button class="back-btn" onclick="goBackFromProduct()">← Back</button>
-      <div class="product-detail-img" id="pdImage"></div>
-      <div class="product-detail-body">
-        <div class="product-detail-cat" id="pdCat"></div>
-        <h1 class="product-detail-name" id="pdName"></h1>
-        <div class="product-detail-price" id="pdPrice"></div>
-        <p class="product-detail-desc" id="pdDesc"></p>
-        <div class="product-detail-meta" id="pdMeta"></div>
-        <button class="btn-primary" onclick="addToCartFromDetail()">Add to Bag</button>
-        <button class="btn-outline" onclick="showView('cart')">View Bag</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════
-       CART VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view" id="view-cart">
-    <div class="cart-view">
-      <div class="cart-header">
-        <button class="back-btn" style="padding:0 0 12px" onclick="showView('shop')">← Continue Shopping</button>
-        <h1 class="cart-title">Your Bag</h1>
-      </div>
-      <div id="cartContent"></div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════
-       ORDER VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view" id="view-order">
-    <div class="order-view">
-      <div class="order-header">
-        <button class="back-btn" style="padding:0 0 12px" onclick="showView('cart')">← Back to Bag</button>
-        <h1 class="order-title">Place Your Order</h1>
-        <p class="order-sub">Fill in your details and we'll confirm within 24 hours</p>
-      </div>
-      <div class="form-body">
-        <h3 class="form-section-title" style="margin-top:0">Order Summary</h3>
-        <div class="order-items-preview" id="orderItemsPreview"></div>
-
-        <h3 class="form-section-title">Personal Details</h3>
-        <div class="form-group">
-          <label class="form-label">Full Name</label>
-          <input class="form-input" id="fname" placeholder="Your full name" type="text">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Phone Number</label>
-          <input class="form-input" id="fphone" placeholder="+92 300 0000000" type="tel">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Email (optional)</label>
-          <input class="form-input" id="femail" placeholder="your@email.com" type="email">
-        </div>
-
-        <h3 class="form-section-title">Delivery Address</h3>
-        <div class="form-group">
-          <label class="form-label">Street Address</label>
-          <input class="form-input" id="faddress" placeholder="House/Flat, Street name" type="text">
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">City</label>
-            <input class="form-input" id="fcity" placeholder="Lahore" type="text">
+      <!-- Gesture list -->
+      <div class="panel">
+        <div class="panel-title">Gestures</div>
+        <div class="gesture-list" id="gestureList">
+          <div class="gesture-item" data-gesture="Open Palm">
+            <div class="g-emoji">✋</div>
+            <div class="g-info">
+              <div class="g-name">Open Palm</div>
+              <div class="g-desc">All 5 fingers extended</div>
+            </div>
+            <div class="g-dot" style="background:var(--c-palm)"></div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Area / Sector</label>
-            <input class="form-input" id="farea" placeholder="DHA, Gulberg…" type="text">
+          <div class="gesture-item" data-gesture="Fist">
+            <div class="g-emoji">✊</div>
+            <div class="g-info">
+              <div class="g-name">Fist</div>
+              <div class="g-desc">All fingers curled</div>
+            </div>
+            <div class="g-dot" style="background:var(--c-fist)"></div>
+          </div>
+          <div class="gesture-item" data-gesture="Peace Sign">
+            <div class="g-emoji">✌️</div>
+            <div class="g-info">
+              <div class="g-name">Peace Sign</div>
+              <div class="g-desc">Index + middle up</div>
+            </div>
+            <div class="g-dot" style="background:var(--c-peace)"></div>
+          </div>
+          <div class="gesture-item" data-gesture="Thumbs Up">
+            <div class="g-emoji">👍</div>
+            <div class="g-info">
+              <div class="g-name">Thumbs Up</div>
+              <div class="g-desc">Only thumb extended</div>
+            </div>
+            <div class="g-dot" style="background:var(--c-thumb)"></div>
+          </div>
+          <div class="gesture-item" data-gesture="Pointing">
+            <div class="g-emoji">👆</div>
+            <div class="g-info">
+              <div class="g-name">Pointing</div>
+              <div class="g-desc">Only index extended</div>
+            </div>
+            <div class="g-dot" style="background:var(--c-point)"></div>
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Special Instructions (optional)</label>
-          <textarea class="form-input" id="fnotes" rows="3" placeholder="Gift wrapping, specific delivery time, etc."></textarea>
-        </div>
-
-        <button class="btn-primary" onclick="placeOrder()">Confirm Order</button>
-        <p class="order-note">We will contact you on WhatsApp or phone to confirm your order before dispatch.</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════
-       SUCCESS VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view" id="view-success">
-    <div class="success-view">
-      <span class="success-icon">✦</span>
-      <h1 class="success-title">Order Placed!</h1>
-      <p class="success-ref" id="successRef">Order #LM-0000</p>
-      <p class="success-msg">Thank you for your order. We'll reach out within 24 hours to confirm delivery details.</p>
-      <button class="btn-primary" style="max-width:240px" onclick="showView('home')">Back to Home</button>
-      <button class="btn-outline" style="max-width:240px" onclick="showView('shop')">Continue Shopping</button>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════
-       ADMIN LOGIN VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view" id="view-adminlogin">
-    <div class="admin-login">
-      <div class="login-card">
-        <div class="login-logo">LUMI<span>È</span>RE</div>
-        <div class="login-subtitle">Admin Panel</div>
-        <div class="form-group" style="text-align:left">
-          <label class="form-label">Username</label>
-          <input class="form-input" id="loginUser" placeholder="admin" type="text">
-        </div>
-        <div class="form-group" style="text-align:left">
-          <label class="form-label">Password</label>
-          <input class="form-input" id="loginPass" placeholder="••••••" type="password" onkeydown="if(event.key==='Enter')doLogin()">
-        </div>
-        <div class="login-error" id="loginError">Incorrect credentials. Try admin / lumiere123</div>
-        <button class="btn-primary" onclick="doLogin()">Sign In</button>
-        <button class="btn-outline" onclick="showView('home')" style="margin-top:10px">← Back to Shop</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════
-       ADMIN VIEW
-  ══════════════════════════════════════════════ -->
-  <div class="view" id="view-admin">
-    <div class="admin-view">
-      <div class="admin-nav">
-        <button class="admin-tab active" onclick="switchAdminTab('dashboard',this)">Dashboard</button>
-        <button class="admin-tab" onclick="switchAdminTab('products',this)">Products</button>
-        <button class="admin-tab" onclick="switchAdminTab('categories',this)">Categories</button>
-        <button class="admin-tab" onclick="switchAdminTab('orders',this)">Orders</button>
-        <button class="admin-tab" onclick="showView('home')">← Exit</button>
       </div>
 
-      <!-- Dashboard Tab -->
-      <div class="admin-section active" id="admin-dashboard">
-        <div style="padding:20px 0 0">
-          <div class="stats-grid" id="statsGrid"></div>
-          <h3 style="font-family:var(--serif);font-size:18px;font-weight:400;margin-bottom:12px">Recent Orders</h3>
-          <div id="recentOrdersAdmin"></div>
-        </div>
-      </div>
-
-      <!-- Products Tab -->
-      <div class="admin-section" id="admin-products">
-        <div class="admin-header">
-          <div class="admin-title">Products</div>
-          <button class="btn-primary" style="width:auto;padding:10px 18px;font-size:11px" onclick="openProductModal()">+ Add Product</button>
-        </div>
-        <div id="productsList"></div>
-      </div>
-
-      <!-- Categories Tab -->
-      <div class="admin-section" id="admin-categories">
-        <div class="admin-header">
-          <div class="admin-title">Categories</div>
-          <button class="btn-primary" style="width:auto;padding:10px 18px;font-size:11px" onclick="openCategoryModal()">+ Add Category</button>
-        </div>
-        <div id="categoriesList"></div>
-      </div>
-
-      <!-- Orders Tab -->
-      <div class="admin-section" id="admin-orders">
-        <div class="admin-header">
-          <div class="admin-title">All Orders</div>
-          <span id="ordersCount" style="font-size:13px;color:var(--gray)"></span>
-        </div>
-        <div id="ordersList"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════
-       PRODUCT MODAL
-  ══════════════════════════════════════════════ -->
-  <div class="modal-overlay" id="productModal">
-    <div class="modal">
-      <div class="modal-handle"></div>
-      <h2 class="modal-title" id="modalTitle">Add Product</h2>
-      <p class="modal-sub" id="modalSub">Fill in the product details below</p>
-      <input type="hidden" id="editProductId">
-
-      <!-- Image Upload -->
-      <div class="form-group">
-        <label class="form-label">Product Image</label>
-        <div class="img-upload-area" id="imgUploadArea" onclick="document.getElementById('imgFileInput').click()">
-          <div class="img-upload-placeholder" id="imgUploadPlaceholder">
-            <span class="img-upload-icon">📷</span>
-            <span class="img-upload-text">Tap to upload image</span>
-            <span class="img-upload-hint">JPG, PNG, WEBP — max 5MB</span>
+      <!-- Finger state -->
+      <div class="panel">
+        <div class="panel-title">Finger State</div>
+        <div class="finger-grid" id="fingerGrid">
+          <div class="finger-col">
+            <div class="finger-bar"><div class="finger-bar-fill" id="f-thumb"></div></div>
+            <div class="finger-label">Thumb</div>
           </div>
-          <img class="img-preview" id="imgPreview" src="" alt="Preview">
+          <div class="finger-col">
+            <div class="finger-bar"><div class="finger-bar-fill" id="f-index"></div></div>
+            <div class="finger-label">Index</div>
+          </div>
+          <div class="finger-col">
+            <div class="finger-bar"><div class="finger-bar-fill" id="f-middle"></div></div>
+            <div class="finger-label">Mid</div>
+          </div>
+          <div class="finger-col">
+            <div class="finger-bar"><div class="finger-bar-fill" id="f-ring"></div></div>
+            <div class="finger-label">Ring</div>
+          </div>
+          <div class="finger-col">
+            <div class="finger-bar"><div class="finger-bar-fill" id="f-pinky"></div></div>
+            <div class="finger-label">Pinky</div>
+          </div>
         </div>
-        <input type="file" id="imgFileInput" accept="image/*" style="display:none" onchange="handleImageUpload(event)">
-        <button class="img-remove-btn" id="imgRemoveBtn" onclick="removeImage(event)" style="display:none">✕ Remove image</button>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">Product Name</label>
-        <input class="form-input" id="pName" placeholder="e.g. Rose Gold Ring">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Category</label>
-        <select class="form-input" id="pCat"></select>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Price (PKR)</label>
-          <input class="form-input" id="pPrice" type="number" placeholder="4500">
+      <!-- Stats -->
+      <div class="panel">
+        <div class="panel-title">Session Stats</div>
+        <div class="stats-grid">
+          <div class="stat-cell">
+            <div class="stat-val" id="statFps">0</div>
+            <div class="stat-key">FPS</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val" id="statHands">0</div>
+            <div class="stat-key">Hands</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val" id="statTotal">0</div>
+            <div class="stat-key">Frames</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val" id="statDetected">0</div>
+            <div class="stat-key">Detected</div>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Stock Qty</label>
-          <input class="form-input" id="pStock" type="number" placeholder="10">
-        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Fallback Emoji (if no image)</label>
-        <input class="form-input" id="pEmoji" placeholder="💍">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Material</label>
-        <input class="form-input" id="pMaterial" placeholder="18k Gold, Sterling Silver…">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Description</label>
-        <textarea class="form-input" id="pDesc" rows="3" placeholder="A short description of the piece…"></textarea>
-      </div>
-      <div class="form-group" style="display:flex;align-items:center;gap:12px">
-        <input type="checkbox" id="pFeatured" style="width:18px;height:18px;accent-color:var(--gold)">
-        <label for="pFeatured" class="form-label" style="margin:0">Featured on homepage</label>
-      </div>
-      <button class="btn-primary" onclick="saveProduct()">Save Product</button>
-      <button class="btn-outline" onclick="closeModal('productModal')">Cancel</button>
+
     </div>
-  </div>
+  </main>
 
-  <!-- ══════════════════════════════════════════════
-       CATEGORY MODAL
-  ══════════════════════════════════════════════ -->
-  <div class="modal-overlay" id="categoryModal">
-    <div class="modal">
-      <div class="modal-handle"></div>
-      <h2 class="modal-title">Add Category</h2>
-      <div class="form-group">
-        <label class="form-label">Category Name</label>
-        <input class="form-input" id="cName" placeholder="e.g. Earrings">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji Icon</label>
-        <input class="form-input" id="cEmoji" placeholder="👂">
-      </div>
-      <button class="btn-primary" onclick="saveCategory()">Save Category</button>
-      <button class="btn-outline" onclick="closeModal('categoryModal')">Cancel</button>
-    </div>
-  </div>
+  <!-- ── Footer ── -->
+  <footer>
+    <p>MediaPipe Tasks Vision · Runs 100% in-browser · No data sent to any server</p>
+    <p>Built with ❤️ · <a href="https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker" target="_blank">MediaPipe Docs</a></p>
+  </footer>
 
-  <!-- ══════════════════════════════════════════════
-       TOAST & WHATSAPP
-  ══════════════════════════════════════════════ -->
-  <div class="toast" id="toast"></div>
-  <a class="wa-float" href="https://wa.me/923001234567" target="_blank" title="Chat on WhatsApp">💬</a>
+</div>
 
-  <script src="script.js"></script>
+<!-- ─────────────────────────────────────────────────────────────────
+     App Logic
+──────────────────────────────────────────────────────────────────── -->
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+// ── DOM refs ──────────────────────────────────────────────────────
+const video        = document.getElementById("video");
+const canvas       = document.getElementById("canvas");
+const ctx          = canvas.getContext("2d");
+const startOverlay = document.getElementById("startOverlay");
+const loadOverlay  = document.getElementById("loadOverlay");
+const btnStart     = document.getElementById("btnStart");
+const statusPill   = document.getElementById("statusPill");
+const statusText   = document.getElementById("statusText");
+const badgeDot     = document.getElementById("badgeDot");
+const badgeLabel   = document.getElementById("badgeLabel");
+const handCountEl  = document.getElementById("handCount");
+const loadText     = document.getElementById("loadText");
+
+// Stats
+const statFps      = document.getElementById("statFps");
+const statHands    = document.getElementById("statHands");
+const statTotal    = document.getElementById("statTotal");
+const statDetected = document.getElementById("statDetected");
+
+// Finger bars
+const fingerEls = {
+  thumb:  document.getElementById("f-thumb"),
+  index:  document.getElementById("f-index"),
+  middle: document.getElementById("f-middle"),
+  ring:   document.getElementById("f-ring"),
+  pinky:  document.getElementById("f-pinky"),
+};
+
+// ── Gesture config ────────────────────────────────────────────────
+const GESTURE_COLORS = {
+  "Open Palm" : "#00ffcc",
+  "Fist"      : "#ff4d6d",
+  "Peace Sign": "#ffd166",
+  "Thumbs Up" : "#4cc9f0",
+  "Pointing"  : "#f77f00",
+  "Unknown"   : "#666688",
+};
+
+// ── Landmark indices ──────────────────────────────────────────────
+const WRIST      = 0;
+const THUMB_IP   = 3,  THUMB_TIP  = 4;
+const INDEX_PIP  = 6,  INDEX_TIP  = 8;
+const MIDDLE_PIP = 10, MIDDLE_TIP = 12;
+const RING_PIP   = 14, RING_TIP   = 16;
+const PINKY_PIP  = 18, PINKY_TIP  = 20;
+
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17],
+];
+
+// ── Geometry helpers ──────────────────────────────────────────────
+function dist2d(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function fingerUp(lm, tipIdx, pipIdx) {
+  return dist2d(lm[tipIdx], lm[WRIST]) > dist2d(lm[pipIdx], lm[WRIST]);
+}
+
+function thumbUp(lm) {
+  return dist2d(lm[THUMB_TIP], lm[WRIST]) > dist2d(lm[THUMB_IP], lm[WRIST]);
+}
+
+function getFingerStates(lm) {
+  return {
+    thumb:  thumbUp(lm),
+    index:  fingerUp(lm, INDEX_TIP,  INDEX_PIP),
+    middle: fingerUp(lm, MIDDLE_TIP, MIDDLE_PIP),
+    ring:   fingerUp(lm, RING_TIP,   RING_PIP),
+    pinky:  fingerUp(lm, PINKY_TIP,  PINKY_PIP),
+  };
+}
+
+function classify(fs) {
+  const { thumb: t, index: i, middle: m, ring: r, pinky: p } = fs;
+  const n = [t,i,m,r,p].filter(Boolean).length;
+  if (n === 5)                              return "Open Palm";
+  if (n === 0)                              return "Fist";
+  if (i && m && !r && !p)                   return "Peace Sign";
+  if (t && !i && !m && !r && !p)            return "Thumbs Up";
+  if (i && !m && !r && !p)                  return "Pointing";
+  return "Unknown";
+}
+
+// ── Drawing ───────────────────────────────────────────────────────
+function drawSkeleton(lm, W, H, color) {
+  // Connections
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 2;
+  for (const [a, b] of CONNECTIONS) {
+    ctx.beginPath();
+    ctx.moveTo(lm[a].x * W, lm[a].y * H);
+    ctx.lineTo(lm[b].x * W, lm[b].y * H);
+    ctx.stroke();
+  }
+  // Joints
+  for (let i = 0; i < 21; i++) {
+    const isTip = [4,8,12,16,20].includes(i);
+    const r = isTip ? 7 : 5;
+    ctx.beginPath();
+    ctx.arc(lm[i].x * W, lm[i].y * H, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+// ── UI updaters ───────────────────────────────────────────────────
+function setStatus(msg, state) {
+  statusText.textContent = msg;
+  statusPill.className = "status-pill" + (state ? " " + state : "");
+}
+
+function setGesture(label) {
+  const color = GESTURE_COLORS[label] || GESTURE_COLORS["Unknown"];
+  badgeLabel.textContent  = label || "—";
+  badgeDot.style.background   = label ? color : "var(--muted)";
+  badgeLabel.style.color       = label ? color : "var(--muted)";
+
+  // Highlight sidebar item
+  document.querySelectorAll(".gesture-item").forEach(el => {
+    el.classList.toggle("active", el.dataset.gesture === label);
+  });
+}
+
+function updateFingerBars(fs) {
+  for (const [key, el] of Object.entries(fingerEls)) {
+    el.style.height    = fs[key] ? "100%" : "15%";
+    el.style.background = fs[key] ? "var(--accent)" : "rgba(255,255,255,0.08)";
+  }
+}
+
+function clearFingerBars() {
+  for (const el of Object.values(fingerEls)) {
+    el.style.height    = "15%";
+    el.style.background = "rgba(255,255,255,0.08)";
+  }
+}
+
+// ── MediaPipe setup ───────────────────────────────────────────────
+let landmarker = null;
+
+async function loadModel() {
+  try {
+    loadText.textContent = "Loading MediaPipe runtime…";
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+
+    loadText.textContent = "Loading hand landmarker model…";
+    landmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      numHands: 2,
+      minHandDetectionConfidence: 0.6,
+      minHandPresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+
+    // Ready
+    loadOverlay.classList.add("hidden");
+    btnStart.textContent = "Start Camera";
+    btnStart.disabled = false;
+    setStatus("Model ready", "ready");
+
+  } catch (err) {
+    loadText.textContent = "Failed to load model. Check your connection.";
+    setStatus("Load failed", "error");
+    console.error(err);
+  }
+}
+
+// ── Camera & render loop ──────────────────────────────────────────
+let running      = false;
+let frameCount   = 0;
+let detectedCount = 0;
+let fpsTimer     = 0;
+let fpsFrames    = 0;
+let lastTs       = 0;
+
+btnStart.addEventListener("click", async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    startOverlay.classList.add("hidden");
+    setStatus("Running", "ready");
+    running = true;
+    requestAnimationFrame(renderLoop);
+  } catch (err) {
+    setStatus("Camera denied", "error");
+    btnStart.textContent = "Camera access denied";
+  }
+});
+
+function renderLoop(now) {
+  if (!running || video.readyState < 2) { requestAnimationFrame(renderLoop); return; }
+
+  // Sync canvas size to video
+  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }
+
+  const W = canvas.width, H = canvas.height;
+  const ts = now;
+
+  // Draw mirrored video frame
+  ctx.save();
+  ctx.translate(W, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, W, H);
+  ctx.restore();
+
+  // Run detection (VIDEO mode needs monotonic timestamps)
+  if (ts !== lastTs) {
+    const result = landmarker.detectForVideo(video, ts);
+    lastTs = ts;
+
+    const hands = result.landmarks || [];
+    handCountEl.textContent = `${hands.length} hand${hands.length !== 1 ? "s" : ""}`;
+    statHands.textContent   = hands.length;
+
+    if (hands.length > 0) {
+      detectedCount++;
+      const lm    = hands[0];
+      const fs    = getFingerStates(lm);
+      const label = classify(fs);
+      const color = GESTURE_COLORS[label] || GESTURE_COLORS["Unknown"];
+
+      // Draw skeleton (mirror-correct: flip x)
+      const mirroredLm = lm.map(p => ({ x: 1 - p.x, y: p.y, z: p.z }));
+      drawSkeleton(mirroredLm, W, H, color);
+
+      setGesture(label);
+      updateFingerBars(fs);
+    } else {
+      setGesture("");
+      clearFingerBars();
+    }
+
+    frameCount++;
+    statTotal.textContent    = frameCount;
+    statDetected.textContent = detectedCount;
+  }
+
+  // FPS counter
+  fpsFrames++;
+  if (now - fpsTimer >= 1000) {
+    statFps.textContent = fpsFrames;
+    fpsFrames = 0;
+    fpsTimer  = now;
+  }
+
+  requestAnimationFrame(renderLoop);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────
+loadModel();
+</script>
 </body>
 </html>
